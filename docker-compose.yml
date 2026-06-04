@@ -1,0 +1,12 @@
+version: '3.8'
+services:
+  ackee_ai:
+    build: .
+    container_name: Ackee_ai
+    ports:
+      - "8080:8080"
+    env_file:
+      - .env
+    restart: unless-stopped
+
+    
