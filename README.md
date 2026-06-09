@@ -435,7 +435,3 @@ Both should contain identity rule for Ackee.
 
 ---
 
-If you want, I can next generate:
-1. `.env.example` file
-2. A working `scripts/ws_test.py` client for both endpoints
-3. A small architecture diagram (Mermaid) section inside this README
