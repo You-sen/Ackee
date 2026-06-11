@@ -117,16 +117,16 @@ def _extract_neighborhood(address_components: list) -> str:
             return component_map[p]
     return ""
 
-
-def _resolve_single_place(query: str) -> dict:
+def _resolve_single_place(query: str, lat: float = None, lng: float = None) -> dict:
     """
     Internal helper: run the full place-lookup pipeline for one query.
     Returns a dict with status, name, address, map_link, place_id, lat, lng,
     neighborhood, website, is_specific.
+    Pass lat/lng to bias results toward the user's current location.
     """
     try:
-        data = _find_place(query)
-
+        data = _find_place(query, lat=lat, lng=lng)
+ 
         if data.get("status") != "OK" or not data.get("candidates"):
             return {
                 "status": "not_found",
@@ -136,28 +136,28 @@ def _resolve_single_place(query: str) -> dict:
                     f"Try including neighborhood, city, and country."
                 ),
             }
-
+ 
         candidate = data["candidates"][0]
         place_id = candidate["place_id"]
         candidate_types = candidate.get("types", [])
-
+ 
         if _is_too_broad(candidate_types):
             refined_query = f"{query} area neighborhood landmark"
-            data = _find_place(refined_query)
+            data = _find_place(refined_query, lat=lat, lng=lng)
             if data.get("status") == "OK" and data.get("candidates"):
                 candidate = data["candidates"][0]
                 place_id = candidate["place_id"]
                 candidate_types = candidate.get("types", [])
-
+ 
         details_data = _get_place_details(place_id)
-
+ 
         if details_data.get("status") != "OK":
             return {
                 "status": "error",
                 "query": query,
                 "message": f"Place details fetch failed: {details_data.get('status')}",
             }
-
+ 
         result = details_data.get("result", {})
         name = result.get("name", "")
         address = result.get("formatted_address", "")
@@ -167,16 +167,16 @@ def _resolve_single_place(query: str) -> dict:
         result_types = result.get("types", [])
         geometry = result.get("geometry", {})
         location = geometry.get("location", {})
-
+ 
         neighborhood = _extract_neighborhood(address_components)
         is_specific = not _is_too_broad(result_types)
-
+ 
         # Always construct the link using _build_map_link so the format is
         # always: ?api=1&query_place_id={place_id}&query={encoded_name}
         # Never use the raw `url` field from the API — it has a different
         # format (?cid=...) that does not match the required structure.
         map_link = _build_map_link(place_id_confirmed, name)
-
+ 
         if not map_link:
             # place_id missing — mark as not specific so the AI tells the user
             # to search manually rather than rendering a broken link.
@@ -186,7 +186,7 @@ def _resolve_single_place(query: str) -> dict:
             )
         else:
             logger.info(f"[_resolve_single_place] map_link={map_link}")
-
+ 
         return {
             "status": "ok",
             "query": query,
@@ -207,10 +207,103 @@ def _resolve_single_place(query: str) -> dict:
             "lng": location.get("lng"),
             "is_specific": is_specific,
         }
-
+ 
     except Exception as e:
         logger.error(f"[_resolve_single_place] Error for '{query}': {e}", exc_info=True)
         return {"status": "error", "query": query, "message": str(e)}
+# def _resolve_single_place(query: str) -> dict:
+#     """
+#     Internal helper: run the full place-lookup pipeline for one query.
+#     Returns a dict with status, name, address, map_link, place_id, lat, lng,
+#     neighborhood, website, is_specific.
+#     """
+#     try:
+#         data = _find_place(query)
+
+#         if data.get("status") != "OK" or not data.get("candidates"):
+#             return {
+#                 "status": "not_found",
+#                 "query": query,
+#                 "message": (
+#                     f"No results found for: {query}. "
+#                     f"Try including neighborhood, city, and country."
+#                 ),
+#             }
+
+#         candidate = data["candidates"][0]
+#         place_id = candidate["place_id"]
+#         candidate_types = candidate.get("types", [])
+
+#         if _is_too_broad(candidate_types):
+#             refined_query = f"{query} area neighborhood landmark"
+#             data = _find_place(refined_query)
+#             if data.get("status") == "OK" and data.get("candidates"):
+#                 candidate = data["candidates"][0]
+#                 place_id = candidate["place_id"]
+#                 candidate_types = candidate.get("types", [])
+
+#         details_data = _get_place_details(place_id)
+
+#         if details_data.get("status") != "OK":
+#             return {
+#                 "status": "error",
+#                 "query": query,
+#                 "message": f"Place details fetch failed: {details_data.get('status')}",
+#             }
+
+#         result = details_data.get("result", {})
+#         name = result.get("name", "")
+#         address = result.get("formatted_address", "")
+#         website = result.get("website", "")
+#         place_id_confirmed = result.get("place_id", place_id)
+#         address_components = result.get("address_components", [])
+#         result_types = result.get("types", [])
+#         geometry = result.get("geometry", {})
+#         location = geometry.get("location", {})
+
+#         neighborhood = _extract_neighborhood(address_components)
+#         is_specific = not _is_too_broad(result_types)
+
+#         # Always construct the link using _build_map_link so the format is
+#         # always: ?api=1&query_place_id={place_id}&query={encoded_name}
+#         # Never use the raw `url` field from the API — it has a different
+#         # format (?cid=...) that does not match the required structure.
+#         map_link = _build_map_link(place_id_confirmed, name)
+
+#         if not map_link:
+#             # place_id missing — mark as not specific so the AI tells the user
+#             # to search manually rather than rendering a broken link.
+#             is_specific = False
+#             logger.warning(
+#                 f"[_resolve_single_place] Could not build map link for: {name}"
+#             )
+#         else:
+#             logger.info(f"[_resolve_single_place] map_link={map_link}")
+
+#         return {
+#             "status": "ok",
+#             "query": query,
+#             "name": name,
+#             "neighborhood": neighborhood,
+#             "address": address,
+#             "website": website,
+#             # map_link — the complete verified Google Maps URL.
+#             # place_id is intentionally excluded so the AI cannot construct
+#             # a partial URL from it.
+#             "map_link": map_link,
+#             # map_link_markdown — the link pre-formatted as a markdown hyperlink.
+#             # USE THIS directly in the response by copying it character-for-character.
+#             # Do NOT rewrite, shorten, or reconstruct this string.
+#             # Example output: [Swan Oyster Depot](https://www.google.com/maps/search/...)
+#             "map_link_markdown": f"[{name}]({map_link})" if map_link else None,
+#             "lat": location.get("lat"),
+#             "lng": location.get("lng"),
+#             "is_specific": is_specific,
+#         }
+
+#     except Exception as e:
+#         logger.error(f"[_resolve_single_place] Error for '{query}': {e}", exc_info=True)
+#         return {"status": "error", "query": query, "message": str(e)}
 
 
 def _get_distance(origin: str, destination: str) -> dict:
@@ -419,22 +512,22 @@ def get_distance_to_place(origin: str, destination: str) -> str:
 def get_multiple_places_and_distances(origin: str, place_queries: list) -> str:
     """
     *** USE THIS TOOL whenever the response includes 2 or more places. ***
-
+ 
     Performs google_place_search AND get_distance_to_place for every place
     in a single tool call — using Python concurrency internally.
-
+ 
     This eliminates the sequential search → distance loop that causes the AI
     to skip tool calls or hallucinate addresses when handling multi-place responses.
-
+ 
     WHEN TO CALL:
     - User asks for N cafes, restaurants, parks, hotels, or any other category
       where N >= 2.
     - You are building a Step 1 scannable list with 2–10 places.
     - Any multi-location response in Roaming Mode.
-
+ 
     DO NOT use google_place_search + get_distance_to_place separately when
     you need results for more than one place — use this tool instead.
-
+ 
     PARAMETERS:
     - origin: traveler's confirmed current location as a plain string.
         Example: "Mirpur 10, Dhaka, Bangladesh"
@@ -446,7 +539,7 @@ def get_multiple_places_and_distances(origin: str, place_queries: list) -> str:
             "Panshi Restaurant Mirpur Dhaka Bangladesh"
         ]
         Minimum 2 entries. Maximum 10 entries.
-
+ 
     RETURNS:
     A JSON list. Each item contains:
     - query             → the original query string (for your reference)
@@ -465,7 +558,7 @@ def get_multiple_places_and_distances(origin: str, place_queries: list) -> str:
     - advice            → one-sentence distance advice to include in your response
     - place_error       → present only if place lookup failed for this entry
     - distance_error    → present only if distance calculation failed for this entry
-
+ 
     USAGE IN RESPONSE:
     - Copy map_link_markdown exactly — never rewrite, reconstruct, or shorten it.
     - Use distance_text and advice exactly as returned for every place.
@@ -477,23 +570,31 @@ def get_multiple_places_and_distances(origin: str, place_queries: list) -> str:
         f"[get_multiple_places_and_distances] origin={origin} | "
         f"queries={place_queries}"
     )
-
+ 
     if not place_queries or len(place_queries) < 1:
         return json.dumps({
             "status": "error",
             "message": "place_queries must contain at least 1 entry.",
         })
-
+ 
     # ── Resolve all places concurrently using threads ─────────────────────
     async def _resolve_all():
         loop = asyncio.get_event_loop()
-
+ 
+        # Get origin coordinates first to bias place search results
+        origin_coords = _find_place(origin)
+        origin_lat, origin_lng = None, None
+        if origin_coords.get("status") == "OK" and origin_coords.get("candidates"):
+            loc = origin_coords["candidates"][0].get("geometry", {}).get("location", {})
+            origin_lat = loc.get("lat")
+            origin_lng = loc.get("lng")
+ 
         place_futures = [
-            loop.run_in_executor(None, _resolve_single_place, q)
+            loop.run_in_executor(None, _resolve_single_place, q, origin_lat, origin_lng)
             for q in place_queries
         ]
         place_results = await asyncio.gather(*place_futures)
-
+ 
         # Build distance destinations from confirmed addresses
         # Use address if lookup succeeded; fall back to query string
         destinations = []
@@ -502,7 +603,7 @@ def get_multiple_places_and_distances(origin: str, place_queries: list) -> str:
                 destinations.append(pr["address"])
             else:
                 destinations.append(None)
-
+ 
         distance_futures = []
         for dest in destinations:
             if dest:
@@ -512,13 +613,13 @@ def get_multiple_places_and_distances(origin: str, place_queries: list) -> str:
             else:
                 # Placeholder for failed place lookups
                 distance_futures.append(asyncio.coroutine(lambda: {"status": "skipped"})())
-
+ 
         distance_results = await asyncio.gather(*distance_futures, return_exceptions=True)
-
+ 
         combined = []
         for i, (pr, dr) in enumerate(zip(place_results, distance_results)):
             entry = {"query": place_queries[i]}
-
+ 
             if pr.get("status") == "ok":
                 map_link = pr.get("map_link", "")
                 name_val = pr.get("name", "")
@@ -537,7 +638,7 @@ def get_multiple_places_and_distances(origin: str, place_queries: list) -> str:
                 })
             else:
                 entry["place_error"] = pr.get("message", "Place lookup failed.")
-
+ 
             if isinstance(dr, Exception):
                 entry["distance_error"] = str(dr)
             elif isinstance(dr, dict) and dr.get("status") == "ok":
@@ -554,11 +655,11 @@ def get_multiple_places_and_distances(origin: str, place_queries: list) -> str:
                         entry[k] = v
             elif isinstance(dr, dict):
                 entry["distance_error"] = dr.get("message", "Distance lookup failed.")
-
+ 
             combined.append(entry)
-
+ 
         return combined
-
+ 
     # ── Run async resolver (handles both sync and async call contexts) ────
     try:
         try:
@@ -573,13 +674,177 @@ def get_multiple_places_and_distances(origin: str, place_queries: list) -> str:
                 combined = loop.run_until_complete(_resolve_all())
         except RuntimeError:
             combined = asyncio.run(_resolve_all())
-
+ 
         logger.info(f"[get_multiple_places_and_distances] Completed {len(combined)} entries.")
         return json.dumps({"status": "ok", "results": combined})
-
+ 
     except Exception as e:
         logger.error(f"[get_multiple_places_and_distances] Failed: {e}", exc_info=True)
         return json.dumps({"status": "error", "message": str(e)})
+# def get_multiple_places_and_distances(origin: str, place_queries: list) -> str:
+#     """
+#     *** USE THIS TOOL whenever the response includes 2 or more places. ***
+
+#     Performs google_place_search AND get_distance_to_place for every place
+#     in a single tool call — using Python concurrency internally.
+
+#     This eliminates the sequential search → distance loop that causes the AI
+#     to skip tool calls or hallucinate addresses when handling multi-place responses.
+
+#     WHEN TO CALL:
+#     - User asks for N cafes, restaurants, parks, hotels, or any other category
+#       where N >= 2.
+#     - You are building a Step 1 scannable list with 2–10 places.
+#     - Any multi-location response in Roaming Mode.
+
+#     DO NOT use google_place_search + get_distance_to_place separately when
+#     you need results for more than one place — use this tool instead.
+
+#     PARAMETERS:
+#     - origin: traveler's confirmed current location as a plain string.
+#         Example: "Mirpur 10, Dhaka, Bangladesh"
+#     - place_queries: a Python list of query strings, one per place.
+#         Each query must follow the format: [place name] [neighborhood] [city] [country]
+#         Example: [
+#             "Shuruchi Restaurant Dhanmondi Dhaka Bangladesh",
+#             "Star Kabab Old Dhaka Bangladesh",
+#             "Panshi Restaurant Mirpur Dhaka Bangladesh"
+#         ]
+#         Minimum 2 entries. Maximum 10 entries.
+
+#     RETURNS:
+#     A JSON list. Each item contains:
+#     - query             → the original query string (for your reference)
+#     - name              → verified place name
+#     - address           → full street address
+#     - neighborhood      → extracted neighborhood name
+#     - map_link_markdown → COPY THIS VERBATIM into your response.
+#                           Already formatted as [Name](URL). Do NOT rewrite it.
+#     - map_link          → raw URL (available if needed; prefer map_link_markdown)
+#     - website           → website if available
+#     - is_specific       → False means city-level result; skip map_link_markdown,
+#                           tell traveler to search directly
+#     - distance_text     → human-readable distance (e.g. "1.2 km")
+#     - duration_text     → walking time (e.g. "15 mins")
+#     - suggestion        → "walk" or "car or rideshare"
+#     - advice            → one-sentence distance advice to include in your response
+#     - place_error       → present only if place lookup failed for this entry
+#     - distance_error    → present only if distance calculation failed for this entry
+
+#     USAGE IN RESPONSE:
+#     - Copy map_link_markdown exactly — never rewrite, reconstruct, or shorten it.
+#     - Use distance_text and advice exactly as returned for every place.
+#     - If is_specific is False, skip map_link_markdown and write:
+#         "Search [place name] [neighborhood] in Google Maps directly."
+#     - If place_error is set, omit that place and fill the slot with the next result.
+#     """
+#     logger.info(
+#         f"[get_multiple_places_and_distances] origin={origin} | "
+#         f"queries={place_queries}"
+#     )
+
+#     if not place_queries or len(place_queries) < 1:
+#         return json.dumps({
+#             "status": "error",
+#             "message": "place_queries must contain at least 1 entry.",
+#         })
+
+#     # ── Resolve all places concurrently using threads ─────────────────────
+#     async def _resolve_all():
+#         loop = asyncio.get_event_loop()
+
+#         place_futures = [
+#             loop.run_in_executor(None, _resolve_single_place, q)
+#             for q in place_queries
+#         ]
+#         place_results = await asyncio.gather(*place_futures)
+
+#         # Build distance destinations from confirmed addresses
+#         # Use address if lookup succeeded; fall back to query string
+#         destinations = []
+#         for pr in place_results:
+#             if pr.get("status") == "ok" and pr.get("address"):
+#                 destinations.append(pr["address"])
+#             else:
+#                 destinations.append(None)
+
+#         distance_futures = []
+#         for dest in destinations:
+#             if dest:
+#                 distance_futures.append(
+#                     loop.run_in_executor(None, _get_distance, origin, dest)
+#                 )
+#             else:
+#                 # Placeholder for failed place lookups
+#                 distance_futures.append(asyncio.coroutine(lambda: {"status": "skipped"})())
+
+#         distance_results = await asyncio.gather(*distance_futures, return_exceptions=True)
+
+#         combined = []
+#         for i, (pr, dr) in enumerate(zip(place_results, distance_results)):
+#             entry = {"query": place_queries[i]}
+
+#             if pr.get("status") == "ok":
+#                 map_link = pr.get("map_link", "")
+#                 name_val = pr.get("name", "")
+#                 entry.update({
+#                     "name": name_val,
+#                     "neighborhood": pr.get("neighborhood"),
+#                     "address": pr.get("address"),
+#                     "map_link": map_link,
+#                     # Pre-formatted markdown hyperlink — copy verbatim into response.
+#                     # Do NOT reconstruct this from map_link or name separately.
+#                     "map_link_markdown": f"[{name_val}]({map_link})" if map_link else None,
+#                     "website": pr.get("website"),
+#                     "is_specific": pr.get("is_specific"),
+#                     "lat": pr.get("lat"),
+#                     "lng": pr.get("lng"),
+#                 })
+#             else:
+#                 entry["place_error"] = pr.get("message", "Place lookup failed.")
+
+#             if isinstance(dr, Exception):
+#                 entry["distance_error"] = str(dr)
+#             elif isinstance(dr, dict) and dr.get("status") == "ok":
+#                 entry.update({
+#                     "distance_text": dr.get("distance_text"),
+#                     "duration_text": dr.get("duration_text"),
+#                     "suggestion": dr.get("suggestion"),
+#                     "advice": dr.get("advice"),
+#                     "unit": dr.get("unit"),
+#                 })
+#                 # Include the numeric distance under its dynamic key
+#                 for k, v in dr.items():
+#                     if k.startswith("distance_") and k not in ("distance_text",):
+#                         entry[k] = v
+#             elif isinstance(dr, dict):
+#                 entry["distance_error"] = dr.get("message", "Distance lookup failed.")
+
+#             combined.append(entry)
+
+#         return combined
+
+#     # ── Run async resolver (handles both sync and async call contexts) ────
+#     try:
+#         try:
+#             loop = asyncio.get_event_loop()
+#             if loop.is_running():
+#                 # We're inside an already-running event loop (e.g. FastAPI)
+#                 import concurrent.futures
+#                 with concurrent.futures.ThreadPoolExecutor() as pool:
+#                     future = pool.submit(asyncio.run, _resolve_all())
+#                     combined = future.result()
+#             else:
+#                 combined = loop.run_until_complete(_resolve_all())
+#         except RuntimeError:
+#             combined = asyncio.run(_resolve_all())
+
+#         logger.info(f"[get_multiple_places_and_distances] Completed {len(combined)} entries.")
+#         return json.dumps({"status": "ok", "results": combined})
+
+#     except Exception as e:
+#         logger.error(f"[get_multiple_places_and_distances] Failed: {e}", exc_info=True)
+#         return json.dumps({"status": "error", "message": str(e)})
 
 
 @tool
