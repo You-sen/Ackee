@@ -72,6 +72,56 @@ def _geocode_address(address: str) -> tuple[float, float] | tuple[None, None]:
     return None, None
 
 
+def _nearby_search(keyword: str, lat: float, lng: float, radius: int = 3000) -> list:
+    """
+    Use Google Places Nearby Search API to find places near exact GPS coordinates.
+    This is the CORRECT API for 'nearest X near me' — it searches by proximity,
+    not by text relevance. Returns up to 5 nearest results sorted by distance.
+    """
+    try:
+        params = {
+            "keyword": keyword,
+            "location": f"{lat},{lng}",
+            "rankby": "distance",  # sort by nearest first, ignores radius
+            "key": settings.GOOGLE_API_KEY,
+        }
+        response = httpx.get(
+            "https://maps.googleapis.com/maps/api/place/nearbysearch/json",
+            params=params,
+            timeout=10,
+        )
+        response.raise_for_status()
+        data = response.json()
+
+        if data.get("status") not in ("OK", "ZERO_RESULTS"):
+            logger.error(f"[_nearby_search] API error: {data.get('status')}")
+            return []
+
+        results = []
+        for place in data.get("results", [])[:5]:
+            place_id = place.get("place_id", "")
+            name = place.get("name", "")
+            vicinity = place.get("vicinity", "")
+            loc = place.get("geometry", {}).get("location", {})
+            map_link = _build_map_link(place_id, name)
+            results.append({
+                "status": "ok",
+                "name": name,
+                "address": vicinity,
+                "place_id": place_id,
+                "map_link": map_link,
+                "map_link_markdown": f"[{name}]({map_link})" if map_link else None,
+                "lat": loc.get("lat"),
+                "lng": loc.get("lng"),
+                "is_specific": True,
+            })
+        logger.info(f"[_nearby_search] Found {len(results)} results for '{keyword}' near {lat},{lng}")
+        return results
+    except Exception as e:
+        logger.error(f"[_nearby_search] Error: {e}", exc_info=True)
+        return []
+
+
 def _find_place(query: str, lat: float = None, lng: float = None, radius: int = 5000) -> dict:
     """
     Call Google Places Find Place API.
@@ -408,6 +458,69 @@ def google_place_search(query: str) -> str:
 
 
 @tool
+def nearby_place_search(keyword: str, origin: str) -> str:
+    """
+    *** USE THIS TOOL when the user says "near me", "nearest", or "closest". ***
+
+    Finds places near the user's EXACT GPS coordinates using Google Places
+    Nearby Search API — sorted by real distance, not text relevance.
+    This is more accurate than google_place_search for proximity queries.
+
+    PARAMETERS:
+    - keyword: what to search for. E.g. "Pizzaburg", "coffee shop", "Swapno"
+    - origin: MUST be in format "lat,lng|address"
+        Example: "23.7461,90.4152|House 02 Road 10 Dhaka"
+        The GPS coordinates before "|" are used for the search.
+        If no GPS available, pass just the address string.
+
+    RETURNS:
+    A JSON list of up to 5 nearest places, each with:
+    - name, address, map_link_markdown, distance_text, duration_text, advice
+
+    Always use map_link_markdown verbatim in your response.
+    """
+    logger.info(f"[nearby_place_search] keyword={keyword} origin={origin}")
+
+    # Extract GPS from origin
+    origin_lat, origin_lng = None, None
+    address = origin
+    if "|" in origin:
+        coords_part, address = origin.split("|", 1)
+        try:
+            origin_lat, origin_lng = map(float, coords_part.split(","))
+        except ValueError:
+            pass
+
+    if origin_lat is None:
+        origin_lat, origin_lng = _geocode_address(address)
+
+    if origin_lat is None:
+        return json.dumps({"status": "error", "message": "Could not determine location coordinates."})
+
+    nearby_results = _nearby_search(keyword, origin_lat, origin_lng)
+
+    if not nearby_results:
+        return json.dumps({"status": "error", "message": f"No {keyword} found near your location."})
+
+    # Add distances for each result
+    combined = []
+    for place in nearby_results:
+        entry = dict(place)
+        dest = place.get("address") or f"{place.get('lat')},{place.get('lng')}"
+        dist = _get_distance(f"{origin_lat},{origin_lng}", dest)
+        if dist.get("status") == "ok":
+            entry.update({
+                "distance_text": dist.get("distance_text"),
+                "duration_text": dist.get("duration_text"),
+                "suggestion": dist.get("suggestion"),
+                "advice": dist.get("advice"),
+            })
+        combined.append(entry)
+
+    return json.dumps({"status": "ok", "results": combined})
+
+
+@tool
 def get_distance_to_place(origin: str, destination: str) -> str:
     """
     Calculate the walking distance and duration between the traveler's current location
@@ -664,10 +777,11 @@ def get_all_tools():
     """Return list of all available tools in priority order."""
     return [
         get_user_info,                       # Always first — anchors all location context
+        nearby_place_search,                 # *** PREFERRED for "near me" / "nearest" queries ***
         web_search,                          # Real-time info
-        google_place_search,                 # Single place lookup
+        google_place_search,                 # Single known place lookup
         get_distance_to_place,               # Single place distance (after google_place_search)
-        get_multiple_places_and_distances,   # *** PREFERRED for 2+ places — place + distance in one call ***
+        get_multiple_places_and_distances,   # *** PREFERRED for 2+ known places ***
     ]
 # import os
 # import json

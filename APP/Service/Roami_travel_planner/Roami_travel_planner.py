@@ -145,9 +145,10 @@ class RoamiTravelPlanner:
                 f"user_latitude: {latitude}\n"
                 f"user_longitude: {longitude}\n"
                 f"user_gps_origin: {latitude},{longitude}\n"
-                f"IMPORTANT: When calling get_multiple_places_and_distances or get_distance_to_place, "
-                f"always set origin to '{latitude},{longitude}|' + the user's address. "
-                f"Example: '{latitude},{longitude}|House 02 Road 10 Dhaka'\n"
+                f"IMPORTANT: When the user says 'near me', 'nearest', or 'closest', "
+                f"ALWAYS call nearby_place_search with origin='{latitude},{longitude}|user location'. "
+                f"For get_multiple_places_and_distances or get_distance_to_place, "
+                f"set origin to '{latitude},{longitude}|user location'.\n"
             )
 
         formatted_input = (
