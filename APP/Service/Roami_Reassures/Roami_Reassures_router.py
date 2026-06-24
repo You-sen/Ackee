@@ -309,7 +309,7 @@ async def roami_reassures_stream_endpoint(
 @router.get('/reassurances/chat_history')
 async def roami_travel_planner_chat_history(
     session_id: str,
-    user_id: str,
+    user_id: Optional[str] = None,
 ):
     """Retrieve chat history for a specific session"""
     try:
@@ -323,9 +323,35 @@ async def roami_travel_planner_chat_history(
 
         messages = []
         for msg in history:
+            role = msg.get("role")
+            content = msg.get("content")
+            
+            # If the document is from Langchain MongoDBChatMessageHistory, it has a 'History' string
+            if role is None and "History" in msg:
+                try:
+                    import json
+                    history_data = json.loads(msg["History"])
+                    msg_type = history_data.get("type")
+                    
+                    # Convert Langchain types to standard roles if needed
+                    if msg_type == "human":
+                        role = "user"
+                    elif "AIMessage" in msg_type or msg_type == "ai":
+                        role = "assistant"
+                    else:
+                        role = msg_type
+                        
+                    data = history_data.get("data", {})
+                    content = data.get("content", "")
+                    
+                except Exception as e:
+                    continue # Skip if parsing fails
+            elif role is None:
+                continue # Skip malformed messages
+                
             messages.append({
-                "type": msg["role"],       
-                "content": msg["content"], 
+                "type": role,       
+                "content": content, 
                 "created_at": msg.get("created_at"),
             })
 
