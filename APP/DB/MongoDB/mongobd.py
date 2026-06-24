@@ -66,7 +66,59 @@ class MongoDBSessionManager:
     ) -> list[dict]:
         try:
             cursor = self.travel_chat_collection.find(
-                    {"session_id": session_id, "user_id": user_id},
+                    {
+                        "$or": [
+                            {"session_id": session_id, "user_id": user_id},
+                            {"SessionId": session_id, "UserId": user_id}
+                        ]
+                    },
+                    {"_id": 0}
+                ).sort("created_at", 1)
+            
+
+            return await cursor.to_list(length=limit)
+
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=str(e))
+
+    async def save_reassures_message(
+        self,
+        session_id: str,
+        role: str,
+        content: str,
+        user_id: str = None,
+    ) -> None:
+        try:
+            doc = {
+                "SessionId": session_id,
+                "role": role,
+                "content": content,
+                "created_at": datetime.now(timezone.utc),
+            }
+            if user_id:
+                doc["UserId"] = user_id
+            await self.message_collection.insert_one(doc)
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=str(e))
+
+    async def get_reassures_chat_history(
+        self,
+        session_id: str,
+        user_id: str = None,
+        limit: int = 100,
+    ) -> list[dict]:
+        try:
+            query = {"$or": [{"session_id": session_id}, {"SessionId": session_id}]}
+            if user_id:
+                query = {
+                    "$or": [
+                        {"session_id": session_id, "user_id": user_id},
+                        {"SessionId": session_id, "UserId": user_id}
+                    ]
+                }
+            
+            cursor = self.message_collection.find(
+                    query,
                     {"_id": 0}
                 ).sort("created_at", 1)
             
