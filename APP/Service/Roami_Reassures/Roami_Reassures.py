@@ -115,7 +115,7 @@ class Roami_Reassures:
         await self._ensure_initialized()
         await self.session_manager.update_session_activity(session_id)
 
-        await self.session_manager.save_travel_message(
+        await self.session_manager.save_reassures_message(
             user_id=user_id,
             session_id=session_id,
             role="user",
@@ -196,7 +196,7 @@ class Roami_Reassures:
                 final_text = "".join(assistant_chunks).strip()
                 if final_text:
                     try:
-                        await self.session_manager.save_travel_message(
+                        await self.session_manager.save_reassures_message(
                             user_id=user_id,
                             session_id=session_id,
                             role="assistant",
@@ -221,7 +221,7 @@ class Roami_Reassures:
                     final_text = "".join(assistant_chunks).strip()
                     if final_text:
                         try:
-                            await self.session_manager.save_travel_message(
+                            await self.session_manager.save_reassures_message(
                                 user_id=user_id,
                                 session_id=session_id,
                                 role="assistant",
@@ -276,9 +276,10 @@ class Roami_Reassures:
                     return {"error": f"Session recovered but error occurred: {str(retry_error)}"}
             
             return {"error": str(e)}
-    async def get_ressurance_chat_history(self, session_id: str, user_id: str):
+    async def get_ressurance_chat_history(self, session_id: str, user_id: str = None):
+        await self._ensure_initialized()
         try:
-            return await self.session_manager.get_travel_chat_history(session_id=session_id, user_id=user_id)
+            return await self.session_manager.get_reassures_chat_history(session_id=session_id, user_id=user_id)
         except Exception as e:
             raise e
     async def list_all_active_sessions(self, user_id: str,Type:str) -> list[dict]:
