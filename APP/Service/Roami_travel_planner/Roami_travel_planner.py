@@ -291,6 +291,7 @@ class RoamiTravelPlanner:
             return {"error": str(e)}
     
     async def get_travel_chat_history(self, session_id: str, user_id: str):
+        await self._ensure_initialized()
         try:
             return await self.session_manager.get_travel_chat_history(
                 session_id=session_id,
